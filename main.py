@@ -1,177 +1,204 @@
-# main.py (обновлённая версия с интеграцией парсеров)
-import argparse
-import sys
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import List, Dict, Optional, Set
 
-from config import logger, LOGS_DIR, DB_PATH
-from models import init_db
+from parsers.client_logs import IceCandidate, CandidatesCollection
+from parsers.game_logs import GameLogParser
+from parsers.client_logs import ClientLogParser
+from icecream import ic
+import ipaddress
+from parsers.iceadapter_logs import IceAdapterLogParser, IceAdapterParseResult
 
-# Импортируем парсеры
-from parsers.game_logs import parse_game_logs
-from parsers.client_logs import parse_client_logs
-from analysis import generate_suspect_report, print_report
-
-
-def cmd_init_db(args):
-    """Инициализация БД"""
-    if DB_PATH.exists():
-        logger.warning(f"Database already exists at {DB_PATH}")
-        if not args.force:
-            logger.info("Use --force to reinitialize")
-            return
-        DB_PATH.unlink()
-        logger.info("Deleted existing database")
-
-    init_db()
-    logger.info("✓ Database initialized")
-
-
-def cmd_load_game_logs(args):
-    """Загрузить все game_*.log из директории"""
-    if not LOGS_DIR.exists():
-        logger.error(f"Logs directory not found: {LOGS_DIR}")
-        return
-
-    game_logs = list(LOGS_DIR.glob("game_*.log"))
-    if not game_logs:
-        logger.warning(f"No game logs found in {LOGS_DIR}")
-        return
-
-    logger.info(f"Found {len(game_logs)} game logs")
-
-    # Вызываем парсер
-    parsed_count = parse_game_logs(game_logs)
-    logger.info(f"✓ Successfully parsed {parsed_count} game logs")
-
-
-def cmd_load_client_logs(args):
-    """Загрузить все client.log.*.0.log из директории"""
-    if not LOGS_DIR.exists():
-        logger.error(f"Logs directory not found: {LOGS_DIR}")
-        return
-
-    client_logs = list(LOGS_DIR.glob("client.log.*.0.log"))
-    if not client_logs:
-        logger.warning(f"No client logs found in {LOGS_DIR}")
-        return
-
-    logger.info(f"Found {len(client_logs)} client logs")
-
-    # Вызываем парсер
-    events_count = parse_client_logs(client_logs, skip_existing=not args.reparse)
-    logger.info(f"✓ Parsed {events_count} connection events from client logs")
-
-
-def cmd_rebuild_all(args):
-    """Пересчитать всё с нуля: drop DB, create fresh, load all logs"""
-    logger.warning("Rebuilding entire database...")
-
-    if DB_PATH.exists():
-        DB_PATH.unlink()
-        logger.info("Deleted old database")
-
-    cmd_init_db(argparse.Namespace(force=True))
-    cmd_load_game_logs(argparse.Namespace(reparse=True))
-    cmd_load_client_logs(argparse.Namespace(reparse=True))
-
-    logger.info("✓ Database rebuild complete")
-
-
-def cmd_status(args):
-    """Показать статус БД: кол-во игроков, матчей, IP и т.п."""
-    logger.info("Database status:")
-    logger.info(f"  DB: {DB_PATH}")
-    logger.info(f"  Logs directory: {LOGS_DIR}")
-
-    # Считаем записи
-    from models import Player, Match, IpAddress, ConnectionEvent
-
-    player_count = Player.select().count()
-    match_count = Match.select().count()
-    ip_count = IpAddress.select().count()
-    event_count = ConnectionEvent.select().count()
-
-    logger.info(f"  Players: {player_count}")
-    logger.info(f"  Matches: {match_count}")
-    logger.info(f"  IP addresses: {ip_count}")
-    logger.info(f"  Connection events: {event_count}")
-
-
-def cmd_report_suspects(args):
-    """Генерировать отчёт по подозрительным игрокам/IP"""
-    logger.info("Generating suspect report...")
-
-    # Вызываем аналитику
-    report = generate_suspect_report(min_recurring_matches=args.min_occurrences)
-    print_report(report)
-
-
-def main():
-    parser = argparse.ArgumentParser(
-        description="FAF Logs Parser: correlate matches, players, IPs to investigate DDoS patterns"
-    )
-
-    subparsers = parser.add_subparsers(dest="command", help="Available commands")
-
-    # ==================== INIT DB ====================
-    init_parser = subparsers.add_parser("init-db", help="Initialize database")
-    init_parser.add_argument(
-        "--force", action="store_true", help="Force reinitialize (delete existing DB)"
-    )
-    init_parser.set_defaults(func=cmd_init_db)
-
-    # ==================== LOAD GAME LOGS ====================
-    game_parser = subparsers.add_parser("load-game-logs", help="Parse game_*.log files")
-    game_parser.add_argument(
-        "--reparse", action="store_true", help="Reparse even if file already processed"
-    )
-    game_parser.set_defaults(func=cmd_load_game_logs)
-
-    # ==================== LOAD CLIENT LOGS ====================
-    client_parser = subparsers.add_parser(
-        "load-client-logs", help="Parse client.log.*.0.log files"
-    )
-    client_parser.add_argument(
-        "--reparse", action="store_true", help="Reparse even if file already processed"
-    )
-    client_parser.set_defaults(func=cmd_load_client_logs)
-
-    # ==================== REBUILD ALL ====================
-    rebuild_parser = subparsers.add_parser(
-        "rebuild-all", help="Rebuild entire DB from scratch (drop + init + load all)"
-    )
-    rebuild_parser.set_defaults(func=cmd_rebuild_all)
-
-    # ==================== STATUS ====================
-    status_parser = subparsers.add_parser("status", help="Show database status")
-    status_parser.set_defaults(func=cmd_status)
-
-    # ==================== REPORT SUSPECTS ====================
-    report_parser = subparsers.add_parser(
-        "report-suspects", help="Generate suspect report"
-    )
-    report_parser.add_argument(
-        "--min-occurrences",
-        type=int,
-        default=2,
-        help="Minimum match occurrences to flag as suspect (default: 2)",
-    )
-    report_parser.set_defaults(func=cmd_report_suspects)
-
-    # ==================== PARSE ARGS ====================
-    args = parser.parse_args()
-
-    if not args.command:
-        parser.print_help()
-        return 1
-
+def is_public_ip(ip: str) -> bool:
     try:
-        args.func(args)
-    except Exception as e:
-        logger.exception(f"Error in command '{args.command}': {e}")
-        return 1
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    return not (addr.is_private or addr.is_loopback or addr.is_link_local)
 
-    return 0
+@dataclass
+class PlayerSessionInfo:
+    match_id: int
+    joined_at: datetime
+    left_at: Optional[datetime]
+    role: str  # 'host' | 'player' | 'observer'
+
+@dataclass
+class PlayerAggregate:
+    uid: int
+    nick: Optional[str] = None
+    sessions: List[PlayerSessionInfo] = field(default_factory=list)
+    candidates: List[IceCandidate] = field(default_factory=list)
+    
+    def get_unique_ips(self) -> Dict[str, str]:
+        """Возвращает словарь уникальных IP → тип кандидата"""
+        ips = {}
+        for cand in self.candidates:
+            if cand.ip not in ips:
+                ips[cand.ip] = cand.type
+        return ips
+    
+    def get_reflexive_ips(self) -> Set[str]:
+        """Возвращает только PUBLIC IP (SERVER_REFLEXIVE)"""
+        return {
+            cand.ip for cand in self.candidates 
+            if 'SERVER_REFLEXIVE_CANDIDATE' in cand.type
+        }
+        
+    def get_public_ips(self) -> Set[str]:
+        return {
+            cand.ip for cand in self.candidates
+            if is_public_ip(cand.ip)
+        }
+
+@dataclass
+class AggregationResult:
+    players: Dict[int, PlayerAggregate]
+
+
+def aggregate_players(
+    match_data: dict,              # результат GameLogParser.parse()
+    ice_data: CandidatesCollection # результат ClientLogParser.parse()
+) -> AggregationResult:
+    players: Dict[int, PlayerAggregate] = {}
+
+    # 1) Сессии из game_*.log
+    match_id = match_data.get('match_id')
+    for sess in match_data.get('sessions', []):
+        uid = sess['player_uid']
+        nick = sess.get('player_nick')
+
+        agg = players.get(uid)
+        if agg is None:
+            agg = PlayerAggregate(uid=uid, nick=nick)
+            players[uid] = agg
+        else:
+            if nick and not agg.nick:
+                agg.nick = nick
+
+        agg.sessions.append(
+            PlayerSessionInfo(
+                match_id=match_id,
+                joined_at=sess['joined_at'],
+                left_at=sess.get('left_at'),
+                role=sess.get('role', 'player'),
+            )
+        )
+
+    # 2) ICE‑кандидаты из client.log.* (все типы)
+    for cand in ice_data.candidates:
+        uid = cand.player_uid
+        agg = players.get(uid)
+        if agg is None:
+            agg = PlayerAggregate(uid=uid)
+            players[uid] = agg
+        agg.candidates.append(cand)
+
+    return AggregationResult(players=players)
+
+
+def print_player_summary(agg_result: AggregationResult):
+    """Выводит полный отчёт игроков с сопоставлением IP"""
+    
+    print("=" * 100)
+    print("PLAYER AGGREGATION REPORT")
+    print("=" * 100)
+    
+    for uid, player in sorted(agg_result.players.items()):
+        print(f"\n🎮 PLAYER UID {uid} | Nick: {player.nick or 'UNKNOWN'}")
+        print("-" * 100)
+        
+        # Сессии в матчах
+        if player.sessions:
+            print(f"  📊 SESSIONS ({len(player.sessions)}):")
+            for session in player.sessions:
+                duration = (session.left_at - session.joined_at).total_seconds() / 60 if session.left_at else "ongoing"
+                if isinstance(duration, float):
+                    duration = f"{duration:.1f} min"
+                print(f"    • Match {session.match_id} | Role: {session.role:10} | "
+                      f"{session.joined_at.isoformat()} → {session.left_at.isoformat() if session.left_at else 'N/A'} "
+                      f"({duration})")
+        else:
+            print(f"  📊 SESSIONS: None")
+        
+        # IP адреса с типами
+        if player.candidates:
+            print(f"\n  🌐 ICE CANDIDATES ({len(player.candidates)} events):")
+            
+            # Уникальные IP с типами
+            unique_ips = player.get_unique_ips()
+            print(f"\n    Unique IPs: {len(unique_ips)}")
+            for ip, cand_type in sorted(unique_ips.items()):
+                is_reflexive = '✓ PUBLIC' if 'SERVER_REFLEXIVE_CANDIDATE' in cand_type else '  private'
+                print(f"      {is_reflexive} | {ip:20} | Type: {cand_type}")
+            
+            # Только PUBLIC IP
+            reflexive_ips = player.get_reflexive_ips()
+            if reflexive_ips:
+                print(f"\n    🔴 PUBLIC IPs (SERVER_REFLEXIVE): {', '.join(sorted(reflexive_ips))}")
+            
+            # Временная шкала
+            print(f"\n    Timeline:")
+            for cand in sorted(player.candidates, key=lambda c: c.time_connected):
+                disconnect = f" → {cand.time_disconnected.isoformat()}" if cand.time_disconnected else ""
+                cand_short = 'SRFLX' if 'SERVER_REFLEXIVE' in cand.type else 'RELAY' if 'RELAYED' in cand.type else 'HOST'
+                print(f"      [{cand_short}] {cand.ip:20} | {cand.time_connected.isoformat()}{disconnect}")
+        else:
+            print(f"\n  🌐 ICE CANDIDATES: None")
+        
+        print()
+
+
+def print_player_mapping(agg_result: AggregationResult):
+    """Компактный вывод: UID → IP mapping"""
+    
+    print("\n" + "=" * 100)
+    print("QUICK REFERENCE: UID ↔ IP MAPPING")
+    print("=" * 100)
+    
+    for uid, player in sorted(agg_result.players.items()):
+        nick = player.nick or '?'
+        public_ips = player.get_public_ips()
+        if public_ips:
+            print(f"{uid:10} | {nick:20} | IPs: {', '.join(sorted(public_ips))}")
+        else:
+            print(f"{uid:10} | {nick:20} | IPs: (none detected)")
+
+
+# if __name__ == "__main__":
+#     # Пример использования
+#     game_parser = GameLogParser("./logs/game_26002356.log")
+#     match_data = game_parser.parse()
+
+#     client_parser = ClientLogParser("./logs/client.log.2025-11-28.0.log")
+#     ice_data = client_parser.parse()
+
+#     agg = aggregate_players(match_data, ice_data)
+    
+#     # Полный отчёт
+#     print_player_summary(agg)
+    
+#     # Быстрая таблица
+#     print_player_mapping(agg)
+
+
+def print_player_ip_mapping(result: IceAdapterParseResult):
+    print(f"Log: {result.log_path}")
+    print(f"GameId: {result.game_id}, local_player_id: {result.local_player_id}")
+    print("=" * 80)
+
+    for uid in sorted(result.players.keys()):
+        p = result.players[uid]
+        public_ips = p.public_ips()
+        nick = p.nick or "UNKNOWN"
+        if public_ips:
+            ips_str = ", ".join(public_ips)
+        else:
+            ips_str = "(no public IPs detected)"
+        print(f"{uid:8} | {nick:20} | {ips_str}")
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    parser = IceAdapterLogParser("logs/iceAdapterLogs/ice-adapter.2025-11-26.log")
+    res = parser.parse()
+    print_player_ip_mapping(res)

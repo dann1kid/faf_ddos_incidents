@@ -106,20 +106,18 @@ class ClientLogParser:
             print(f"DEBUG: Найдено кандидатов: {len(candidates)}")
             
             for cand in candidates:
+                ip = cand.get('ip', '')
                 cand_type = cand.get('type', '')
-                print(f"DEBUG: Candidate type: '{cand_type}'")
-                
-                if 'SERVER_REFLEXIVE_CANDIDATE' in cand_type:
-                    ip = cand.get('ip', '')
-                    if ip and ip not in ['127.0.0.1', '::1', 'localhost']:
-                        self.candidates.append(IceCandidate(
-                            player_uid=src_uid,
-                            ip=ip,
-                            type=cand_type,
-                            time_connected=timestamp
-                        ))
-                        print(f"DEBUG: Добавлен кандидат: {ip} ({cand_type})")
-                        
+                if not ip:
+                    continue
+                self.candidates.append(IceCandidate(
+                    player_uid=src_uid,   # или owner_uid = data['srcId']
+                    ip=ip,
+                    type=cand_type,
+                    time_connected=timestamp,
+                ))
+                print(f"DEBUG: Добавлен кандидат: {ip} ({cand_type})")
+                    
         except json.JSONDecodeError as e:
             print(f"DEBUG: JSON ошибка: {e}")
             print(f"DEBUG: Попытка парсинга: {json_str[:500]}")
