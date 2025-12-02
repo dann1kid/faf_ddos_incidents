@@ -1,0 +1,10 @@
+# faf_config.toml
+[paths]
+logs_dir = 'C:\Users\admin\AppData\Roaming\Forged Alliance Forever'
+
+[database]
+db_file = "faf_analysis.db"
+
+[analysis]
+auto_mark_ddos = false
+ip_threshold = 0.5

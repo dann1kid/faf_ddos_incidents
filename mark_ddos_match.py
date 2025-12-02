@@ -3,12 +3,33 @@ import typer
 from models import Match, PlayerSession, DDoSIncident, PlayerIpLease, IpAddress, Player, ParsedFile, db
 from pathlib import Path
 from main import scan_and_aggregate
+from config import config
 
 from typing import Optional
 import datetime
 
 
 app = typer.Typer(help="FAF DDoS Analysis CLI")
+
+
+# Callback для загрузки конфига при старте
+@app.callback()
+def main(
+    config_file: Optional[Path] = typer.Option(None, "--config", "-c", help="Путь к конфигу TOML"),
+    logs_dir: Optional[Path] = typer.Option(None, "--logs", "-l", help="Путь к логам (перезаписывает конфиг)"),
+):
+    """
+    FAF DDoS Analysis CLI — анализ логов и триангуляция IP
+    """
+    # Перезагрузка конфига если указан файл
+    if config_file:
+        global config
+        config = Config(config_file)
+    
+    # Перезаписываем logs_dir если передан в CLI
+    if logs_dir:
+        config.logs_dir = logs_dir
+        
 
 @app.command()
 def list_matches(
@@ -198,7 +219,7 @@ def update_database(logs_dir: str = "."):
     with db.atomic():
         for file_path in new_game_files + new_ice_files:
             file_stat = file_path.stat()
-            ParsedFile.create(
+            ParsedFile.get_or_create(
                 path=str(file_path),
                 kind='GAME' if file_path.name.startswith('game_') else 'ICE_ADAPTER',
                 mtime=datetime.datetime.fromtimestamp(file_stat.st_mtime),
@@ -215,15 +236,18 @@ def update_database(logs_dir: str = "."):
 
 
 @app.command()
-def update(logs_dir: str = typer.Option(".", "--dir", help="Директория с логами")):
+def update():
     """Обновить базу данных новыми данными из логов"""
-    update_database(logs_dir)
+    typer.echo(f"📂 Используется путь к логам: {config.logs_dir}")
+    update_database(str(config.logs_dir))
+
 
 
 
 @app.command()
 def interactive():
-    """Интерактивный режим для быстрой пометки матчей и анализа"""
+    """Интерактивный режим (использует путь из конфига)"""
+    typer.echo(f"📂 Используется путь к логам: {config.logs_dir}")
     typer.echo("🎮 Интерактивный режим DDoS анализа")
     typer.echo("=" * 60)
     typer.echo("Команды:")
@@ -233,6 +257,7 @@ def interactive():
     typer.echo("  report <id>       — детальный отчёт по матчу")
     typer.echo("  ip <ip>           — показать все матчи с этим IP")
     typer.echo("  exit / quit / q   — выйти из интерактивного режима")
+    typer.echo("  update            — обновить базу данных")
     typer.echo("=" * 60)
     
     while True:
@@ -270,6 +295,15 @@ def interactive():
                     typer.echo(f"✅ {message}" if success else f"❌ {message}")
                 except ValueError:
                     typer.echo("❌ Неверный формат ID матча")
+                    
+            elif command == 'update':
+                # Обновляем базу данных
+                try:
+                    update_database(str(config.logs_dir))
+                    typer.echo("✅ Обновление завершено успешно")
+                except Exception as e:
+                    typer.echo(f"❌ Ошибка при обновлении: {e}")
+                continue
             
             elif command == 'unmark' and len(parts) > 1:
                 try:
@@ -297,7 +331,7 @@ def interactive():
             typer.echo("\n👋 Выход из интерактивного режима")
             break
         
-        
+
 @app.command()
 def shell():
     """Алиас для интерактивного режима"""
