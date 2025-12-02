@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import List, Dict, Optional
 from models import init_database, db
 from ingest import ingest_match
-
+from config import config
 
 from parsers.game_logs import GameLogParser
 import ipaddress
@@ -92,7 +92,7 @@ def scan_and_aggregate(logs_dir: str = "."):
 
     # 1. Парсим все ice-adapter логи
     ice_matches: Dict[int, IceAdapterParseResult] = {}
-    ice_files = sorted(logs_path.glob("logs/iceAdapterLogs/ice-adapter.*.log"))
+    ice_files = sorted((logs_path / "logs" / "iceAdapterLogs").glob("./ice-adapter.*.log"))
 
     print(f"🔍 Найдено ice-adapter логов: {len(ice_files)}")
     for ice_file in ice_files:
@@ -132,6 +132,8 @@ def scan_and_aggregate(logs_dir: str = "."):
             print(f"   ❌ {game_file.name} (id={match_id}) → нет ice-adapter данных")
 
     return all_matches
+
+
 
 
 def print_complete_report(
@@ -253,7 +255,8 @@ def ingest_all_matches(matches: List[AggregatedMatch]):
 
 if __name__ == "__main__":
     init_database()
-    matches = scan_and_aggregate(".")
+    logs_root = str(config.logs_dir)
+    matches = scan_and_aggregate(logs_root)
     ingest_all_matches(matches)
 
     # Показать отчёт без своего IP

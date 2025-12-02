@@ -1,11 +1,13 @@
 # ingest.py
 from peewee import *
-from models import *
+from models import Player, PlayerIpLease, IpAddress, Match, PlayerSession
 from typing import Optional
 import datetime
 import ipaddress
+from models import db
 
 from structures import AggregatedMatch
+from scoring import confidence_for_candidate_type
 
 def get_or_create_player(uid: int, nick: Optional[str] = None) -> Player:
     """Получить или создать игрока по UID"""
@@ -107,6 +109,8 @@ def ingest_player_session(
 
 def ingest_match(agg_match: AggregatedMatch):
     """Загрузить весь матч со всеми игроками, IP и сессиями"""
+    
+
     with db.atomic():
         # Создаём матч
         match, _ = Match.get_or_create(
@@ -138,6 +142,12 @@ def ingest_match(agg_match: AggregatedMatch):
                 ).on_conflict_ignore()  # <-- SQLite расширение
                 
                 query.execute()
+                conf = confidence_for_candidate_type(cand.type, cand.ip)
+                PlayerIpLease.insert(
+                    player=db_player, ip=ip_record,
+                    leased_from=cand.timestamp, leased_until=None,
+                    source='ICE_ADAPTER', confidence=conf
+                ).on_conflict_ignore().execute()
 
             # Загружаем сессию
             ingest_player_session(
@@ -147,3 +157,6 @@ def ingest_match(agg_match: AggregatedMatch):
                 left_at=player.left_at,
                 role=player.role,
             )
+
+    
+    

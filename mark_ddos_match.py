@@ -4,9 +4,11 @@ from models import Match, PlayerSession, DDoSIncident, PlayerIpLease, IpAddress,
 from pathlib import Path
 from main import scan_and_aggregate
 from config import config
+from colors import fmt_risk, fmt_conf
 
 from typing import Optional
 import datetime
+from scoring import recompute_risk_scores
 
 
 app = typer.Typer(help="FAF DDoS Analysis CLI")
@@ -242,6 +244,84 @@ def update():
     update_database(str(config.logs_dir))
 
 
+@app.command()
+def player(uid: int):
+    """Детальный отчёт по игроку: риск и confidence по IP"""
+    p = Player.get_or_none(Player.faf_uid == uid)
+    if not p:
+        typer.echo("Игрок не найден")
+        return
+    
+    typer.echo(f"UID: {p.faf_uid}")
+    typer.echo(f"Nick: {p.current_nick}")
+    typer.echo(f"Risk: {fmt_risk(p.risk_score)}")
+    typer.echo("\nПоследние IP назначения:")
+    
+    leases = (PlayerIpLease
+              .select(PlayerIpLease, IpAddress)
+              .join(IpAddress)
+              .where(PlayerIpLease.player == p)
+              .order_by(PlayerIpLease.leased_from.desc())
+              .limit(20))
+    
+    typer.echo(f"{'Когда':<20} {'IP':<18} {'Conf':<8} {'Src':<10}")
+    typer.echo("-" * 60)
+    for l in leases:
+        ts = l.leased_from.strftime("%m-%d %H:%M")
+        typer.echo(f"{ts:<20} {l.ip.ip:<18} {fmt_conf(l.confidence):<8} {l.source:<10}")
+
+
+@app.command()
+def top_suspects(limit: int = typer.Option(20, "--limit", "-n", help="Сколько игроков показать")):
+    """Показать топ игроков по риску причастности к DDoS"""
+    q = (Player
+         .select()
+         .order_by(Player.risk_score.desc())
+         .limit(limit))
+    
+    typer.echo("\nЛегенда риска:")
+    typer.echo("  \033[32m0.00–0.29\033[0m  — низкий риск")
+    typer.echo("  \033[33m0.30–0.69\033[0m  — средний риск")
+    typer.echo("  \033[31m0.70–1.00\033[0m — высокий риск")
+    typer.echo(f"{'UID':<8} {'Nick':<20} {'Risk':<8}")
+    
+    typer.echo("-" * 40)
+    for p in q:
+        typer.echo(f"{p.faf_uid:<8} {p.current_nick or 'UNKNOWN':<20} {fmt_risk(p.risk_score)}")
+
+
+@app.command()
+def rescore():
+    recompute_risk_scores()
+    typer.echo("Готово. Риск пересчитан.")
+    
+    
+@app.command()
+def match_detail(match_id: int):
+    """Отчёт по матчу с тепловой шкалой риска/уверенности"""
+    m = Match.get_or_none(Match.match_id == match_id)
+    if not m:
+        typer.echo("Матч не найден")
+        return
+    
+    sessions = (PlayerSession
+                .select(PlayerSession, Player)
+                .join(Player)
+                .where(PlayerSession.match == m))
+    
+    typer.echo(f"МАТЧ {m.match_id} (Game ID: {m.game_id})")
+    typer.echo(f"{'UID':<8} {'Nick':<20} {'Risk':<8} {'MaxConf':<8}")
+    typer.echo("-" * 60)
+    
+    for s in sessions:
+        p = s.player
+        leases = (PlayerIpLease
+                  .select()
+                  .where((PlayerIpLease.player == p) &
+                         (PlayerIpLease.leased_from >= (s.joined_at or datetime.datetime.min))))
+        max_conf = max((l.confidence for l in leases), default=0.0)
+        typer.echo(f"{p.faf_uid:<8} {p.current_nick or 'UNKNOWN':<20} {fmt_risk(p.risk_score):<8} {fmt_conf(max_conf):<8}")
+
 
 
 @app.command()
@@ -258,6 +338,10 @@ def interactive():
     typer.echo("  ip <ip>           — показать все матчи с этим IP")
     typer.echo("  exit / quit / q   — выйти из интерактивного режима")
     typer.echo("  update            — обновить базу данных")
+    typer.echo("  player <uid>      — показать информацию по игроку")
+    typer.echo("  top <n>           — показать топ подозрительных игроков")
+    typer.echo("  rescore           — пересчитать риски всех игроков")
+    typer.echo("  match_detail <id> — показать детальную информацию по матчу")
     typer.echo("=" * 60)
     
     while True:
@@ -319,6 +403,51 @@ def interactive():
                     typer.echo(get_match_report(match_id))
                 except ValueError:
                     typer.echo("❌ Неверный формат ID матча")
+                    
+            elif command == "player" and len(parts) > 1:
+                try:
+                    uid = int(parts[1])
+                    p = Player.get_or_none(Player.faf_uid == uid)
+                    if not p:
+                        typer.echo("Игрок не найден")
+                        continue
+                    typer.echo(f"UID: {p.faf_uid}")
+                    typer.echo(f"Nick: {p.current_nick}")
+                    typer.echo(f"Risk: {fmt_risk(p.risk_score)}")
+                    typer.echo("\nПоследние IP назначения:")
+                    leases = (PlayerIpLease
+                              .select(PlayerIpLease, IpAddress)
+                              .join(IpAddress)
+                              .where(PlayerIpLease.player == p)
+                              .order_by(PlayerIpLease.leased_from.desc())
+                              .limit(20))
+                    typer.echo(f"{'Когда':<20} {'IP':<18} {'Conf':<8} {'Src':<10}")
+                    typer.echo("-" * 60)
+                    for l in leases:
+                        ts = l.leased_from.strftime("%m-%d %H:%M")
+                        typer.echo(f"{ts:<20} {l.ip.ip:<18} {fmt_conf(l.confidence):<8} {l.source:<10}")
+                except ValueError:
+                    typer.echo("❌ Неверный UID")
+            
+            elif command == "top" and len(parts) > 1:
+                n = 20
+                try:
+                    n = int(parts[1])
+                except ValueError:
+                    typer.echo("❌ Неверное число, использую 20")
+                    n = 20
+                q = (Player
+                     .select()
+                     .order_by(Player.risk_score.desc())
+                     .limit(n))
+                typer.echo(f"{'UID':<8} {'Nick':<20} {'Risk':<8}")
+                typer.echo("-" * 40)
+                for p in q:
+                    typer.echo(f"{p.faf_uid:<8} {p.current_nick or 'UNKNOWN':<20} {fmt_risk(p.risk_score)}")
+                typer.echo("\nЛегенда риска:")
+                typer.echo("  \033[32m0.00–0.29\033[0m  — низкий")
+                typer.echo("  \033[33m0.30–0.69\033[0m  — средний")
+                typer.echo("  \033[31m0.70–1.00\033[0m — высокий")
             
             elif command == 'ip' and len(parts) > 1:
                 ip = parts[1]
