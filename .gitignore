@@ -138,7 +138,7 @@ __pycache__/
 *.pyo
 *.egg-info/
 .pytest_cache/
-
+*.db
 # Virtual environment
 venv/
 .venv/
