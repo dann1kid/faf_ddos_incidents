@@ -9,7 +9,7 @@ from colors import fmt_risk, fmt_conf
 from typing import Optional
 import datetime
 from scoring import recompute_risk_scores
-
+from main import ingest_all_matches
 
 app = typer.Typer(help="FAF DDoS Analysis CLI")
 
@@ -226,6 +226,10 @@ def update_database(logs_dir: str = "."):
                 kind='GAME' if file_path.name.startswith('game_') else 'ICE_ADAPTER',
                 mtime=datetime.datetime.fromtimestamp(file_stat.st_mtime),
             )
+            
+    ingest_all_matches(matches)
+    
+    
     
     # 6. Статистика
     total_matches = Match.select().count()

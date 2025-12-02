@@ -92,7 +92,7 @@ def scan_and_aggregate(logs_dir: str = "."):
 
     # 1. Парсим все ice-adapter логи
     ice_matches: Dict[int, IceAdapterParseResult] = {}
-    ice_files = sorted((logs_path / "logs" / "iceAdapterLogs").glob("./ice-adapter.*.log"))
+    ice_files = sorted(list((logs_path / "logs" / "iceAdapterLogs").glob("./ice-adapter.*.log")) + list(sorted((logs_path / "logs" / "iceAdapterLogs").glob("./ice-adapter.log"))))
 
     print(f"🔍 Найдено ice-adapter логов: {len(ice_files)}")
     for ice_file in ice_files:
