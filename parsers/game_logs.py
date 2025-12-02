@@ -56,7 +56,7 @@ class GameLogParser:
             if peer_match:
                 nick = peer_match.group(1)
                 uid = int(peer_match.group(2))
-                address = peer_match.group(3)  # 127.0.0.1:63122 (localhost через ICE)
+                peer_match.group(3)  # 127.0.0.1:63122 (localhost через ICE)
 
                 if uid not in self.players:
                     self.players[uid] = {"uid": uid, "nick": nick, "role": "player"}
@@ -72,7 +72,7 @@ class GameLogParser:
             if conn_match:
                 nick = conn_match.group(1)
                 uid = int(conn_match.group(2))
-                connected_to = [int(x.strip()) for x in conn_match.group(3).split(",")]
+                [int(x.strip()) for x in conn_match.group(3).split(",")]
 
                 if uid not in self.players:
                     self.players[uid] = {"uid": uid, "nick": nick, "role": "player"}

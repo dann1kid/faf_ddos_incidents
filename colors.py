@@ -9,13 +9,16 @@ def color_for_value(v: float) -> str:
         return "\033[32m"  # green
     if v < 0.7:
         return "\033[33m"  # yellow
-    return "\033[31m"      # red
+    return "\033[31m"  # red
+
 
 RESET = "\033[0m"
+
 
 def fmt_risk(v: float) -> str:
     c = color_for_value(v)
     return f"{c}{v:0.2f}{RESET}"
+
 
 def fmt_conf(v: float) -> str:
     c = color_for_value(v)

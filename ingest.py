@@ -9,6 +9,7 @@ from models import db
 from structures import AggregatedMatch
 from scoring import confidence_for_candidate_type
 
+
 def get_or_create_player(uid: int, nick: Optional[str] = None) -> Player:
     """Получить или создать игрока по UID"""
     player, created = Player.get_or_create(
@@ -109,44 +110,46 @@ def ingest_player_session(
 
 def ingest_match(agg_match: AggregatedMatch):
     """Загрузить весь матч со всеми игроками, IP и сессиями"""
-    
 
     with db.atomic():
         # Создаём матч
         match, _ = Match.get_or_create(
             match_id=agg_match.match_id,
             defaults={
-                'game_id': agg_match.game_id,
-                'started_at': None,
-                'ended_at': None,
-            }
+                "game_id": agg_match.game_id,
+                "started_at": None,
+                "ended_at": None,
+            },
         )
-        
+
         # Загружаем игроков
         for uid, player in agg_match.players.items():
             # Создаём игрока
             db_player = get_or_create_player(uid, player.nick)
-            
+
             # Загружаем IP кандидаты
             for cand in player.all_candidates:
                 ip_record = get_or_create_ip(cand.ip, cand.type)
-                
+
                 # ВАЖНО: используем INSERT OR IGNORE для гарантии идемпотентности
                 query = PlayerIpLease.insert(
                     player=db_player,
                     ip=ip_record,
                     leased_from=cand.timestamp,
                     leased_until=None,
-                    source='ICE_ADAPTER',
+                    source="ICE_ADAPTER",
                     confidence=1.0,
                 ).on_conflict_ignore()  # <-- SQLite расширение
-                
+
                 query.execute()
                 conf = confidence_for_candidate_type(cand.type, cand.ip)
                 PlayerIpLease.insert(
-                    player=db_player, ip=ip_record,
-                    leased_from=cand.timestamp, leased_until=None,
-                    source='ICE_ADAPTER', confidence=conf
+                    player=db_player,
+                    ip=ip_record,
+                    leased_from=cand.timestamp,
+                    leased_until=None,
+                    source="ICE_ADAPTER",
+                    confidence=conf,
                 ).on_conflict_ignore().execute()
 
             # Загружаем сессию
@@ -157,6 +160,3 @@ def ingest_match(agg_match: AggregatedMatch):
                 left_at=player.left_at,
                 role=player.role,
             )
-
-    
-    

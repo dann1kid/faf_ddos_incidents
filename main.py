@@ -1,7 +1,5 @@
-from dataclasses import dataclass, field
-from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import List, Dict
 from models import init_database, db
 from ingest import ingest_match
 from config import config
@@ -10,7 +8,6 @@ from parsers.game_logs import GameLogParser
 import ipaddress
 from parsers.iceadapter_logs import IceAdapterLogParser
 from structures import IceAdapterParseResult
-
 
 
 def is_public_ip(ip: str) -> bool:
@@ -22,6 +19,7 @@ def is_public_ip(ip: str) -> bool:
 
 
 from structures import AggregatedMatch, AggregatedPlayer
+
 
 def aggregate_game_and_ice(
     game_result: dict,  # результат GameLogParser.parse()
@@ -92,7 +90,12 @@ def scan_and_aggregate(logs_dir: str = "."):
 
     # 1. Парсим все ice-adapter логи
     ice_matches: Dict[int, IceAdapterParseResult] = {}
-    ice_files = sorted(list((logs_path / "logs" / "iceAdapterLogs").glob("./ice-adapter.*.log")) + list(sorted((logs_path / "logs" / "iceAdapterLogs").glob("./ice-adapter.log"))))
+    ice_files = sorted(
+        list((logs_path / "logs" / "iceAdapterLogs").glob("./ice-adapter.*.log"))
+        + list(
+            sorted((logs_path / "logs" / "iceAdapterLogs").glob("./ice-adapter.log"))
+        )
+    )
 
     print(f"🔍 Найдено ice-adapter логов: {len(ice_files)}")
     for ice_file in ice_files:
@@ -132,8 +135,6 @@ def scan_and_aggregate(logs_dir: str = "."):
             print(f"   ❌ {game_file.name} (id={match_id}) → нет ice-adapter данных")
 
     return all_matches
-
-
 
 
 def print_complete_report(
@@ -245,13 +246,14 @@ def print_complete_report(
 def ingest_all_matches(matches: List[AggregatedMatch]):
     """Загрузить все матчи в БД"""
     print(f"Загрузка {len(matches)} матчей в базу данных...")
-    
+
     with db.atomic():
         for i, match in enumerate(matches, 1):
             ingest_match(match)
             print(f"  ✅ Матч {match.match_id} загружен ({i}/{len(matches)})")
-    
+
     print("✅ Все матчи загружены успешно!")
+
 
 if __name__ == "__main__":
     init_database()

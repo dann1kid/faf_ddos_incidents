@@ -4,6 +4,7 @@ from typing import List, Dict, Optional
 import ipaddress
 from pathlib import Path
 
+
 @dataclass
 class IceAdapterCandidate:
     player_uid: int
@@ -23,6 +24,7 @@ class IceAdapterCandidate:
         except ValueError:
             return False
         return not (addr.is_private or addr.is_loopback or addr.is_link_local)
+
 
 @dataclass
 class PlayerSessionInfo:
@@ -80,9 +82,6 @@ class CandidatesCollection:
     candidates: List[IceCandidate]
 
 
-
-
-
 @dataclass
 class IceAdapterPlayer:
     uid: int
@@ -112,4 +111,3 @@ class IceAdapterParseResult:
     local_player_id: Optional[int]
     players: Dict[int, IceAdapterPlayer] = field(default_factory=dict)
     candidates: List[IceAdapterCandidate] = field(default_factory=list)
-    

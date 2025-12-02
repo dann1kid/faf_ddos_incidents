@@ -5,7 +5,6 @@ import datetime
 from peewee import *
 
 
-
 db = SqliteDatabase("faf_analysis.db")
 
 

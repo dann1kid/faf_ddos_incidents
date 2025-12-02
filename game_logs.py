@@ -209,7 +209,6 @@ class GameLogParser:
                 "mapname": data.get("mapname"),
                 "game_type": data.get("game_type"),
                 "host": data.get("host"),
-                # Если есть таймштампы
                 "started_at": data.get("game_start") or data.get("launched_at"),
                 "ended_at": data.get("game_end"),
             }

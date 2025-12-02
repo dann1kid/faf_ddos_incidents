@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -8,6 +7,7 @@ import json
 import re
 
 from structures import IceAdapterParseResult, IceAdapterPlayer, IceAdapterCandidate
+
 
 class IceAdapterLogParser:
     """
@@ -111,7 +111,7 @@ class IceAdapterLogParser:
                     continue
 
                 src_id = int(data.get("srcId"))
-                dest_id = int(data.get("destId"))
+                int(data.get("destId"))
                 cand_list = data.get("candidates", [])
 
                 # Убедимся, что у srcId есть Player
@@ -234,7 +234,7 @@ class IceAdapterLogParser:
                     continue
 
                 src_id = int(data.get("srcId"))
-                dest_id = int(data.get("destId"))
+                int(data.get("destId"))
                 cand_list = data.get("candidates", [])
 
                 # Убеждаемся, что src_id есть в players
