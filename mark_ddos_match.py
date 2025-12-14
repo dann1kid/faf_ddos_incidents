@@ -496,20 +496,43 @@ def interactive():
                 except ValueError:
                     typer.echo("❌ Неверный UID")
 
-            elif command == "top" and len(parts) > 1:
+            elif command == "top":
                 n = 20
-                try:
-                    n = int(parts[1])
-                except ValueError:
-                    typer.echo("❌ Неверное число, использую 20")
-                    n = 20
-                q = Player.select().order_by(Player.risk_score.desc()).limit(n)
-                typer.echo(f"{'UID':<8} {'Nick':<20} {'Risk':<8}")
-                typer.echo("-" * 40)
+                if len(parts) > 1:
+                    try:
+                        n = int(parts[1])
+                    except ValueError:
+                        typer.echo("❌ Неверное число, использую 20")
+                        n = 20
+
+                q = (Player
+                    .select()
+                    .order_by(Player.risk_score.desc())
+                    .limit(n))
+
+                typer.echo(f"{'UID':<8} {'Nick':<20} {'Risk':<8} {'Last IP':<18}")
+                typer.echo("-" * 70)
+
                 for p in q:
+                    # последний ПУБЛИЧНЫЙ IP: не private и не loopback
+                    last_lease = (PlayerIpLease
+                                .select(PlayerIpLease, IpAddress)
+                                .join(IpAddress)
+                                .where(
+                                    (PlayerIpLease.player == p) &
+                                    (IpAddress.is_private == False) &
+                                    (IpAddress.is_loopback == False)
+                                )
+                                .order_by(PlayerIpLease.leased_from.desc())
+                                .first())
+
+                    last_ip = last_lease.ip.ip if last_lease else "-"
+
                     typer.echo(
-                        f"{p.faf_uid:<8} {p.current_nick or 'UNKNOWN':<20} {fmt_risk(p.risk_score)}"
+                        f"{p.faf_uid:<8} {p.current_nick or 'UNKNOWN':<20} "
+                        f"{fmt_risk(p.risk_score):<8} {last_ip:<18}"
                     )
+
                 typer.echo("\nЛегенда риска:")
                 typer.echo("  \033[32m0.00–0.29\033[0m  — низкий")
                 typer.echo("  \033[33m0.30–0.69\033[0m  — средний")
